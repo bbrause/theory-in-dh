@@ -1,0 +1,171 @@
+<html>
+<head>
+    <script src="d3.v5.min.js" charset="utf-8"></script>
+</head>
+<body>
+    <div id="titlebox" class="ontop"></div>
+    <div id="settingsbox" class="ontop"></div>
+    <div id="graph"></div>
+<script>
+
+function getKeyByValue(object, value) {
+    return Object.keys(object).find(key => object[key] === value);
+  };
+
+var seed_idx;
+
+async function start() {
+    var word_counts = await d3.json("word_count_theory_top1000.json")
+    var vocabulary = await d3.json("vocabulary.json")
+    var cooc_values = await d3.json("dice_matrix_theory_top1000.json")
+
+    var min_count = 0;
+    var max_count = 30000;
+    var min_value_primary = 0.025;
+    var min_value_secondary = 0.048;
+    seed_word = "theory";
+
+    var graph = {};
+    graph["nodes"] = [];
+    graph["links"] = [];
+    var added = {};
+
+    seed_idx = getKeyByValue(vocabulary, seed_word);
+    graph["nodes"].push({ "term" : vocabulary[seed_idx], "id" : seed_idx, "count" : word_counts[seed_idx] });
+
+    for (var i in cooc_values[seed_idx]) {
+        if (i != seed_idx) {
+            if (word_counts[i] <= max_count && word_counts[i] >= min_count) {
+                if (cooc_values[seed_idx][i] >= min_value_primary) {
+                    graph["nodes"].push({ "term" : vocabulary[i], "id" : i, "count" : word_counts[i] });
+                    graph["links"].push({ "source" : seed_idx, "target" : i, "value" : cooc_values[seed_idx][i]});
+                    added[i] = [seed_idx];
+                }
+            }
+        }
+    }
+
+    for (var i in added) {
+        for (var j in cooc_values[i]) {
+            if (j != seed_idx) {
+                if (j > i && cooc_values[i][j] >= min_value_secondary) {
+                    if (word_counts[i] <= max_count && word_counts[i] >= min_count) {
+                        if (word_counts[j] <= max_count && word_counts[j] >= min_count) {
+                            if (!(j in added)) {
+                                graph["nodes"].push({ "term" : vocabulary[j], "id" : j, "count" : word_counts[j]});
+                                added[j] = [];
+                            }
+                            if (!(i in added[j]) && !(j in added[i])) {
+                                graph["links"].push({ "source" : i, "target" : j, "value" : cooc_values[i][j]})
+                                added[i].push(j);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    console.log(graph);
+
+    drawGraph(graph);
+};
+
+var height = window.innerHeight;
+var width =  window.innerWidth;
+
+var canvas = d3.select('#graph').append('canvas')
+.attr('width', width + 'px')
+.attr('height', height + 'px');
+
+var canvas = document.querySelector("canvas"),
+    context = canvas.getContext("2d");
+
+var simulation = d3.forceSimulation()
+    .force("link", d3.forceLink().id(function(d) { return d.id; }))
+    .force("charge", d3.forceManyBody().strength(-200))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .alphaTarget(0)
+    .alphaDecay(0.01);
+
+function drawGraph(graph) {
+  simulation
+      .nodes(graph.nodes)
+      .on("tick", ticked);
+
+  simulation.force("link")
+      .links(graph.links);
+
+  d3.select(canvas)
+      .call(d3.drag()
+          .container(canvas)
+          .subject(dragsubject)
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended));
+
+  function ticked() {
+    var margin = 20;
+    graph.nodes.forEach(function(d) { 
+      d.x = Math.max(margin, Math.min(width - margin, d.x))
+      d.y = Math.max(margin, Math.min(height - margin, d.y))
+    })
+
+    context.clearRect(0, 0, width, height);
+
+    context.beginPath();
+    graph.links.forEach(drawLink);
+    context.strokeStyle = "#aaa";
+    context.stroke();
+
+    context.beginPath();
+    graph.nodes.forEach(drawNode);
+    context.fill();
+    context.strokeStyle = "#fff";
+    context.stroke();
+  }
+
+  function dragsubject() {
+    return simulation.find(d3.event.x, d3.event.y);
+  }
+};
+
+function dragstarted() {
+  if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+  d3.event.subject.fx = d3.event.subject.x;
+  d3.event.subject.fy = d3.event.subject.y;
+}
+
+function dragged() {
+  d3.event.subject.fx = d3.event.x;
+  d3.event.subject.fy = d3.event.y;
+}
+
+function dragended() {
+  if (!d3.event.active) simulation.alphaTarget(0);
+  d3.event.subject.fx = null;
+  d3.event.subject.fy = null;
+}
+
+function drawLink(d) {
+  context.moveTo(d.source.x, d.source.y);
+  context.lineTo(d.target.x, d.target.y);
+}
+
+function drawNode(d) {
+  context.moveTo(d.x + 3, d.y);
+  context.arc(d.x, d.y, 3, 0, 2 * Math.PI);
+  if (d.id == seed_idx) {
+    context.fillStyle = "darkred";
+  } else {
+    context.fillStyle = "black";
+  };
+  context.font = parseInt(d.count**0.3)+'px Arial';
+  context.fillText(d.term, d.x+5, d.y+3);
+}
+
+start();
+
+</script>
+</body>
+</html>
